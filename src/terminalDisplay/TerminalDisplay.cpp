@@ -759,21 +759,15 @@ void TerminalDisplay::paintEvent(QPaintEvent *pe)
     // the terminal content.  We still need to paint backgrounds in the
     // area NOT covered by the GL widget (e.g. header) and all overlays.
     if (_glWidget) {
-        // The GL widget covers contentsRect(); only paint outside of it.
-        const QRegion region = pe->region() & contentsRect();
         // Paint the background color for regions outside the GL widget
-        // (e.g. padding / margins).
+        // (i.e. padding / margins outside contentsRect()).
         const QRegion marginRegion = QRegion(pe->region()) - QRegion(contentsRect());
         for (const QRect &rect : marginRegion) {
             const bool useOpacity = window() && window()->testAttribute(Qt::WA_TranslucentBackground);
             _terminalPainter->drawBackground(paint, rect, _terminalColor->backgroundColor(), useOpacity);
         }
-        Q_UNUSED(region)
-        // Fall through to paint overlays below.
-        goto paint_overlays;
-    }
+    } else
 #endif
-
     {
         // Determine which characters should be repainted (1 region unit = 1 character)
         QRegion dirtyImageRegion;
@@ -820,10 +814,6 @@ void TerminalDisplay::paintEvent(QPaintEvent *pe)
         _terminalPainter->drawInputMethodPreeditString(paint, preeditRect(), _inputMethodData, _image);
         paintFilters(paint);
     }
-
-#if HAVE_OPENGL
-paint_overlays:
-#endif
 
     {
         const bool drawBorder = _borderWhenActive && hasFocus();

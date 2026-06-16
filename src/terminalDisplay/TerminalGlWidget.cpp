@@ -295,72 +295,65 @@ void TerminalGlWidget::updateDisplayData(const Character *image,
     m_bgInstances.reserve(columns * lines);
     m_glyphInstances.reserve(columns * lines);
 
-    for (int row = 0; row < lines; ++row) {
-        for (int col = 0; col < columns; ++col) {
-            const int idx = row * columns + col;
-            if (idx >= imageSize) {
-                goto done;
+    // Iterate over cells; clamp to the actual image size as a safety guard.
+    const int total = qMin(imageSize, columns * lines);
+    for (int i = 0; i < total; ++i) {
+        const int row = i / columns;
+        const int col = i % columns;
+        const Character &ch = image[i];
+
+        // Background quad
+        {
+            const QColor bg = ch.backgroundColor.color(colorTable);
+            BgInstance bi;
+            bi.col = static_cast<float>(col);
+            bi.row = static_cast<float>(row);
+            bi.r = static_cast<float>(bg.redF());
+            bi.g = static_cast<float>(bg.greenF());
+            bi.b = static_cast<float>(bg.blueF());
+            bi.a = static_cast<float>(bg.alphaF());
+            m_bgInstances.append(bi);
+        }
+
+        // Glyph quad (skip space characters and the right half of
+        // double-width pairs to avoid rendering them twice)
+        if (ch.character != 0 && ch.character != ' ' && !ch.isRightHalfOfDoubleWide()) {
+            if (ch.rendition.f.conceal) {
+                continue;
             }
-            const Character &ch = image[idx];
 
-            // ---------------------------------------------------------
-            // Background quad
-            // ---------------------------------------------------------
-            {
-                const QColor bg = ch.backgroundColor.color(colorTable);
-                BgInstance bi;
-                bi.col = static_cast<float>(col);
-                bi.row = static_cast<float>(row);
-                bi.r = static_cast<float>(bg.redF());
-                bi.g = static_cast<float>(bg.greenF());
-                bi.b = static_cast<float>(bg.blueF());
-                bi.a = static_cast<float>(bg.alphaF());
-                m_bgInstances.append(bi);
+            const QString text = QString(QChar(static_cast<ushort>(ch.character)));
+            const bool bold = ch.rendition.f.bold;
+            const bool italic = ch.rendition.f.italic;
+            const GlyphInfo gi = m_atlas.getGlyph(text, bold, italic);
+
+            if (!gi.valid) {
+                continue;
             }
 
-            // ---------------------------------------------------------
-            // Glyph quad (skip space characters and the right half of
-            // double-width pairs to avoid rendering them twice)
-            // ---------------------------------------------------------
-            if (ch.character != 0 && ch.character != ' ' && !ch.isRightHalfOfDoubleWide()) {
-                if (ch.rendition.f.conceal) {
-                    continue;
-                }
+            const QColor fg = ch.foregroundColor.color(colorTable);
 
-                const QString text = QString(QChar(static_cast<ushort>(ch.character)));
-                const bool bold = ch.rendition.f.bold;
-                const bool italic = ch.rendition.f.italic;
-                const GlyphInfo gi = m_atlas.getGlyph(text, bold, italic);
-
-                if (!gi.valid) {
-                    continue;
-                }
-
-                const QColor fg = ch.foregroundColor.color(colorTable);
-
-                GlyphInstance glyph;
-                glyph.col = static_cast<float>(col);
-                glyph.row = static_cast<float>(row);
-                glyph.r = static_cast<float>(fg.redF());
-                glyph.g = static_cast<float>(fg.greenF());
-                glyph.b = static_cast<float>(fg.blueF());
-                glyph.a = static_cast<float>(fg.alphaF());
-                glyph.u0 = gi.u0;
-                glyph.v0 = gi.v0;
-                glyph.u1 = gi.u1;
-                glyph.v1 = gi.v1;
-                glyph.offX = static_cast<float>(gi.bearingX);
-                // bearingY is boundingRect.top() (negative for chars above baseline).
-                // Adding fontAscent gives the pixel offset from cell top to glyph top.
-                glyph.offY = static_cast<float>(m_fontAscent + gi.bearingY);
-                glyph.w = static_cast<float>(gi.width);
-                glyph.h = static_cast<float>(gi.height);
-                m_glyphInstances.append(glyph);
-            }
+            GlyphInstance glyph;
+            glyph.col = static_cast<float>(col);
+            glyph.row = static_cast<float>(row);
+            glyph.r = static_cast<float>(fg.redF());
+            glyph.g = static_cast<float>(fg.greenF());
+            glyph.b = static_cast<float>(fg.blueF());
+            glyph.a = static_cast<float>(fg.alphaF());
+            glyph.u0 = gi.u0;
+            glyph.v0 = gi.v0;
+            glyph.u1 = gi.u1;
+            glyph.v1 = gi.v1;
+            glyph.offX = static_cast<float>(gi.bearingX);
+            // bearingY is boundingRect.top() (negative for chars above baseline).
+            // Adding fontAscent gives the pixel offset from cell top to glyph top.
+            glyph.offY = static_cast<float>(m_fontAscent + gi.bearingY);
+            glyph.w = static_cast<float>(gi.width);
+            glyph.h = static_cast<float>(gi.height);
+            m_glyphInstances.append(glyph);
         }
     }
 
-done:
     m_dataReady = true;
     update();
 }
