@@ -151,6 +151,7 @@ const std::vector<Profile::PropertyInfo> Profile::DefaultProperties = {
     {LineNumbers, "LineNumbers", TERMINAL_GROUP, 0},
     {AutoSaveInterval, "AutoSaveInterval", TERMINAL_GROUP, 10000},
     {KittyKeyboardEnabled, "KittyKeyboardEnabled", TERMINAL_GROUP, true},
+    {UseGpuAcceleration, "UseGpuAcceleration", TERMINAL_GROUP, false},
 
     // Cursor
     {UseCustomCursorColor, "UseCustomCursorColor", CURSOR_GROUP, false},

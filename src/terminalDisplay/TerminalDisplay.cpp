@@ -74,6 +74,10 @@
 #include "TerminalPainter.h"
 #include "TerminalScrollBar.h"
 
+#if HAVE_OPENGL
+#include "TerminalGlWidget.h"
+#endif
+
 #include "unicode/ubidi.h"
 #include "unicode/uchar.h"
 #include "unicode/ushape.h"
@@ -666,6 +670,20 @@ void TerminalDisplay::updateImage()
         update(dirtyRegion);
     }
 
+#if HAVE_OPENGL
+    // Feed updated character data to the GPU renderer so it can re-draw
+    // the terminal content on its next paint cycle.
+    if (_glWidget && _image) {
+        _glWidget->updateDisplayData(_image,
+                                     _imageSize,
+                                     _usedColumns,
+                                     _usedLines,
+                                     _terminalColor->colorTable(),
+                                     _terminalFont.get(),
+                                     _contentRect);
+    }
+#endif
+
     if (_allowBlinkingText && _hasTextBlinker && !_blinkTextTimer->isActive()) {
         _blinkTextTimer->start();
     }
@@ -736,83 +754,111 @@ void TerminalDisplay::paintEvent(QPaintEvent *pe)
 
     QPainter paint(this);
 
-    // Determine which characters should be repainted (1 region unit = 1 character)
-    QRegion dirtyImageRegion;
-    const QRegion region = pe->region() & contentsRect();
-
-    for (const QRect &rect : region) {
-        dirtyImageRegion += widgetToImage(rect);
-        // We can use the opacity settings only if we are in a top level window which actually supports opacity.
-        // Many apps that use a konsole part such as kate or dolphin don't for performance reasons.
-        // This will result in repaint glitches iin wayland due to missing damage information
-        const bool useOpacity = window() && window()->testAttribute(Qt::WA_TranslucentBackground);
-        _terminalPainter->drawBackground(paint, rect, _terminalColor->backgroundColor(), useOpacity);
-    }
-
-    if (_displayVerticalLine) {
-        const int fontWidth = _terminalFont->fontWidth();
-        const int x = (fontWidth / 2) + (fontWidth * _displayVerticalLineAtChar);
-        const QColor lineColor = _terminalColor->foregroundColor();
-
-        paint.setPen(lineColor);
-        paint.drawLine(QPoint(x, 0), QPoint(x, height()));
-    }
-
-    // only turn on text anti-aliasing, never turn on normal antialiasing
-    // set https://bugreports.qt.io/browse/QTBUG-66036
-    paint.setRenderHint(QPainter::TextAntialiasing, _terminalFont->antialiasText());
-
-    for (const QRect &rect : std::as_const(dirtyImageRegion)) {
-        _terminalPainter->drawContents(_image, paint, rect, false, _imageSize, _bidiEnabled, _lineProperties, _screenWindow->screen()->ulColorTable());
-    }
-
-    if (screenWindow()->currentResultLine() != -1) {
-        _searchResultRect.setRect(0,
-                                  contentRect().top() + (screenWindow()->currentResultLine() - screenWindow()->currentLine()) * _terminalFont->fontHeight(),
-                                  columns() * terminalFont()->fontWidth(),
-                                  _terminalFont->fontHeight());
-        _searchResultRect = highdpi_adjust_rect(_searchResultRect);
-        _terminalPainter->drawCurrentResultRect(paint, _searchResultRect);
-    }
-
-    if (_scrollBar->highlightScrolledLines().isEnabled()) {
-        _terminalPainter->highlightScrolledLines(paint, _scrollBar->highlightScrolledLines().isTimerActive(), _scrollBar->highlightScrolledLines().rect());
-    }
-    _terminalPainter->drawInputMethodPreeditString(paint, preeditRect(), _inputMethodData, _image);
-    paintFilters(paint);
-
-    const bool drawBorder = _borderWhenActive && hasFocus();
-    if (drawBorder) {
-        paint.setPen(_focusBorderColor);
-        const auto x = _scrollBar->scrollBarPosition() == Enum::ScrollBarLeft ? _scrollBar->width() : 0;
-        const auto sb = _scrollBar->scrollBarPosition() != Enum::ScrollBarHidden ? _scrollBar->width() : 0;
-        const auto y = _headerBar->isVisible() ? _headerBar->height() : 0;
-        paint.drawRect(x, y, width() - sb - 1, height() - y - 1);
-    }
-
-    const bool drawDimmed = _dimWhenInactive && !hasFocus();
-    if (drawDimmed) {
-        const QColor dimColor(0, 0, 0, _dimValue);
-        for (const QRect &rect : region) {
-            paint.fillRect(rect, dimColor);
+#if HAVE_OPENGL
+    // When GPU mode is active the TerminalGlWidget child widget draws
+    // the terminal content.  We still need to paint backgrounds in the
+    // area NOT covered by the GL widget (e.g. header) and all overlays.
+    if (_glWidget) {
+        // The GL widget covers contentsRect(); only paint outside of it.
+        const QRegion region = pe->region() & contentsRect();
+        // Paint the background color for regions outside the GL widget
+        // (e.g. padding / margins).
+        const QRegion marginRegion = QRegion(pe->region()) - QRegion(contentsRect());
+        for (const QRect &rect : marginRegion) {
+            const bool useOpacity = window() && window()->testAttribute(Qt::WA_TranslucentBackground);
+            _terminalPainter->drawBackground(paint, rect, _terminalColor->backgroundColor(), useOpacity);
         }
+        Q_UNUSED(region)
+        // Fall through to paint overlays below.
+        goto paint_overlays;
+    }
+#endif
+
+    {
+        // Determine which characters should be repainted (1 region unit = 1 character)
+        QRegion dirtyImageRegion;
+        const QRegion region = pe->region() & contentsRect();
+
+        for (const QRect &rect : region) {
+            dirtyImageRegion += widgetToImage(rect);
+            // We can use the opacity settings only if we are in a top level window which actually supports opacity.
+            // Many apps that use a konsole part such as kate or dolphin don't for performance reasons.
+            // This will result in repaint glitches iin wayland due to missing damage information
+            const bool useOpacity = window() && window()->testAttribute(Qt::WA_TranslucentBackground);
+            _terminalPainter->drawBackground(paint, rect, _terminalColor->backgroundColor(), useOpacity);
+        }
+
+        if (_displayVerticalLine) {
+            const int fontWidth = _terminalFont->fontWidth();
+            const int x = (fontWidth / 2) + (fontWidth * _displayVerticalLineAtChar);
+            const QColor lineColor = _terminalColor->foregroundColor();
+
+            paint.setPen(lineColor);
+            paint.drawLine(QPoint(x, 0), QPoint(x, height()));
+        }
+
+        // only turn on text anti-aliasing, never turn on normal antialiasing
+        // set https://bugreports.qt.io/browse/QTBUG-66036
+        paint.setRenderHint(QPainter::TextAntialiasing, _terminalFont->antialiasText());
+
+        for (const QRect &rect : std::as_const(dirtyImageRegion)) {
+            _terminalPainter->drawContents(_image, paint, rect, false, _imageSize, _bidiEnabled, _lineProperties, _screenWindow->screen()->ulColorTable());
+        }
+
+        if (screenWindow()->currentResultLine() != -1) {
+            _searchResultRect.setRect(0,
+                                      contentRect().top() + (screenWindow()->currentResultLine() - screenWindow()->currentLine()) * _terminalFont->fontHeight(),
+                                      columns() * terminalFont()->fontWidth(),
+                                      _terminalFont->fontHeight());
+            _searchResultRect = highdpi_adjust_rect(_searchResultRect);
+            _terminalPainter->drawCurrentResultRect(paint, _searchResultRect);
+        }
+
+        if (_scrollBar->highlightScrolledLines().isEnabled()) {
+            _terminalPainter->highlightScrolledLines(paint, _scrollBar->highlightScrolledLines().isTimerActive(), _scrollBar->highlightScrolledLines().rect());
+        }
+        _terminalPainter->drawInputMethodPreeditString(paint, preeditRect(), _inputMethodData, _image);
+        paintFilters(paint);
     }
 
-    if (_drawOverlay) {
-        const auto y = _headerBar->isVisible() ? _headerBar->height() : 0;
-        const auto rect = _overlayEdge == Qt::LeftEdge ? QRect(0, y, width() / 2, height())
-            : _overlayEdge == Qt::TopEdge              ? QRect(0, y, width(), height() / 2)
-            : _overlayEdge == Qt::RightEdge            ? QRect(width() - width() / 2, y, width() / 2, height())
-                                                       : QRect(0, height() - height() / 2, width(), height() / 2);
+#if HAVE_OPENGL
+paint_overlays:
+#endif
 
-        paint.setRenderHint(QPainter::Antialiasing);
-        paint.setPen(Qt::NoPen);
-        paint.setBrush(QColor(100, 100, 100, 127));
-        paint.drawRect(rect);
+    {
+        const bool drawBorder = _borderWhenActive && hasFocus();
+        if (drawBorder) {
+            paint.setPen(_focusBorderColor);
+            const auto x = _scrollBar->scrollBarPosition() == Enum::ScrollBarLeft ? _scrollBar->width() : 0;
+            const auto sb = _scrollBar->scrollBarPosition() != Enum::ScrollBarHidden ? _scrollBar->width() : 0;
+            const auto y = _headerBar->isVisible() ? _headerBar->height() : 0;
+            paint.drawRect(x, y, width() - sb - 1, height() - y - 1);
+        }
+
+        const bool drawDimmed = _dimWhenInactive && !hasFocus();
+        if (drawDimmed) {
+            const QColor dimColor(0, 0, 0, _dimValue);
+            for (const QRect &rect : pe->region()) {
+                paint.fillRect(rect, dimColor);
+            }
+        }
+
+        if (_drawOverlay) {
+            const auto y = _headerBar->isVisible() ? _headerBar->height() : 0;
+            const auto rect = _overlayEdge == Qt::LeftEdge ? QRect(0, y, width() / 2, height())
+                : _overlayEdge == Qt::TopEdge              ? QRect(0, y, width(), height() / 2)
+                : _overlayEdge == Qt::RightEdge            ? QRect(width() - width() / 2, y, width() / 2, height())
+                                                           : QRect(0, height() - height() / 2, width(), height() / 2);
+
+            paint.setRenderHint(QPainter::Antialiasing);
+            paint.setPen(Qt::NoPen);
+            paint.setBrush(QColor(100, 100, 100, 127));
+            paint.drawRect(rect);
+        }
+
+        // Draw badge overlay
+        drawBadge(paint);
     }
-
-    // Draw badge overlay
-    drawBadge(paint);
 }
 
 void TerminalDisplay::drawBadge(QPainter &painter)
@@ -1122,6 +1168,12 @@ void TerminalDisplay::resizeEvent(QResizeEvent *event)
     _searchBar->move(x, y);
 
     _hoverLinkIndicator->move(0, height() - _hoverLinkIndicator->height());
+
+#if HAVE_OPENGL
+    if (_glWidget) {
+        _glWidget->setGeometry(contentsRect());
+    }
+#endif
 }
 
 void TerminalDisplay::propagateSize()
@@ -3311,6 +3363,25 @@ IncrementalSearchBar *TerminalDisplay::searchBar() const
     return _searchBar;
 }
 
+#if HAVE_OPENGL
+void TerminalDisplay::setGpuAccelerated(bool enable)
+{
+    if (enable && !_glWidget) {
+        _glWidget = new TerminalGlWidget(this);
+        // Position the GL widget to cover the terminal content area.
+        // It will be resized properly in resizeEvent / calcGeometry.
+        _glWidget->setGeometry(contentsRect());
+        _glWidget->show();
+        // Force a full redraw through the GPU path on next updateImage
+        update();
+    } else if (!enable && _glWidget) {
+        delete _glWidget;
+        _glWidget = nullptr;
+        update();
+    }
+}
+#endif
+
 void TerminalDisplay::applyProfile(const Profile::Ptr &profile)
 {
     // load color scheme
@@ -3334,6 +3405,10 @@ void TerminalDisplay::applyProfile(const Profile::Ptr &profile)
     setBlinkingCursorEnabled(profile->blinkingCursorEnabled());
     setAnimatingCursorEnabled(profile->animatingCursorEnabled());
     setBlinkingTextEnabled(profile->blinkingTextEnabled());
+
+#if HAVE_OPENGL
+    setGpuAccelerated(profile->property<bool>(Profile::UseGpuAcceleration));
+#endif
     _tripleClickMode = Enum::TripleClickModeEnum(profile->property<int>(Profile::TripleClickMode));
     setAutoCopySelectedText(profile->autoCopySelectedText());
     _ctrlRequiredForDrag = profile->property<bool>(Profile::CtrlRequiredForDrag);

@@ -21,10 +21,15 @@
 #include "ScreenWindow.h"
 #include "ScrollState.h"
 #include "colorscheme/ColorScheme.h"
+#include "config-konsole.h"
 #include "konsoleprivate_export.h"
 #include "widgets/TerminalHeaderBar.h"
 
 #include "TerminalBell.h"
+
+#if HAVE_OPENGL
+#include "TerminalGlWidget.h"
+#endif
 
 class QDrag;
 class QDragEnterEvent;
@@ -860,6 +865,20 @@ private:
     QRectF currentCursorRect;
     QRectF targetCursorRect;
     QTimer *animationTimer;
+
+#if HAVE_OPENGL
+    /** GPU-accelerated rendering widget (null when GPU mode is off). */
+    TerminalGlWidget *_glWidget = nullptr;
+
+    /**
+     * Enable or disable GPU-accelerated rendering.
+     * When @p enable is true and Qt OpenGL support is available, a
+     * @c TerminalGlWidget child is created that renders the terminal
+     * content via the GPU.  The normal QPainter path is still used for
+     * overlays (dim, border, badge, filters).
+     */
+    void setGpuAccelerated(bool enable);
+#endif
 };
 
 }

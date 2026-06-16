@@ -479,6 +479,12 @@ public:
          * so enabling this only makes the feature available.
          */
         KittyKeyboardEnabled,
+        /** (bool) Whether to use OpenGL GPU-accelerated rendering for the terminal
+         * display. When enabled, glyphs are cached in a texture atlas and all cell
+         * backgrounds and text are rendered via the GPU, reducing CPU usage
+         * significantly on busy terminals.  Requires Qt OpenGL support.
+         */
+        UseGpuAcceleration,
     };
 
     Q_ENUM(Property)

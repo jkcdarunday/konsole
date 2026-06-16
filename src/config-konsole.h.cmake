@@ -17,3 +17,6 @@
 
 /* Defined if libkapsule-qt is available for Kapsule container support */
 #cmakedefine01 HAVE_KAPSULE
+
+/* Defined if Qt OpenGL is available for GPU-accelerated terminal rendering */
+#cmakedefine01 HAVE_OPENGL
