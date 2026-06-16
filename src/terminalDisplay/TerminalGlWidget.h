@@ -15,7 +15,7 @@
 
 #include <QFont>
 #include <QOpenGLBuffer>
-#include <QOpenGLFunctions>
+#include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
@@ -45,7 +45,7 @@ class TerminalFont;
  * The widget is intended to be embedded as a child of @c TerminalDisplay
  * and resized to cover the terminal content area exactly.
  */
-class TerminalGlWidget : public QOpenGLWidget, protected QOpenGLFunctions
+class TerminalGlWidget : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core
 {
     Q_OBJECT
 
