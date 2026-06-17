@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: None
+# SPDX-License-Identifier: CC0-1.0
+
+name: "Copilot Setup Steps"
+
+# Run the setup steps whenever they are changed so they can be validated,
+# and allow manual re-runs from the Actions tab.
+on:
+    workflow_dispatch:
+    push:
+        paths:
+            - .github/workflows/copilot-setup-steps.yml
+    pull_request:
+        paths:
+            - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+    # Must be called `copilot-setup-steps` to be picked up by Copilot.
+    copilot-setup-steps:
+        runs-on: ubuntu-24.04
+
+        permissions:
+            contents: read
+
+        steps:
+            - name: Add Kubuntu backports PPA for latest KF6
+              run: |
+                  sudo apt-get update -q
+                  sudo apt-get install -y software-properties-common
+                  sudo add-apt-repository -y ppa:kubuntu-ppa/backports
+                  sudo apt-get update -q
+
+            - name: Install build tools
+              run: |
+                  sudo apt-get install -y \
+                      cmake \
+                      ninja-build \
+                      pkg-config
+
+            - name: Install Qt6 dependencies
+              run: |
+                  sudo apt-get install -y \
+                      qt6-base-dev \
+                      qt6-base-private-dev \
+                      qt6-multimedia-dev \
+                      libqt6opengl6-dev \
+                      libqt6openglwidgets6-dev
+
+            - name: Install KF6 dependencies
+              run: |
+                  sudo apt-get install -y \
+                      extra-cmake-modules \
+                      libkf6bookmarks-dev \
+                      libkf6config-dev \
+                      libkf6configwidgets-dev \
+                      libkf6coreaddons-dev \
+                      libkf6crash-dev \
+                      libkf6guiaddons-dev \
+                      libkf6i18n-dev \
+                      libkf6iconthemes-dev \
+                      libkf6kio-dev \
+                      libkf6newstuff-dev \
+                      libkf6notifications-dev \
+                      libkf6notifyconfig-dev \
+                      libkf6parts-dev \
+                      libkf6service-dev \
+                      libkf6textwidgets-dev \
+                      libkf6widgetsaddons-dev \
+                      libkf6windowsystem-dev \
+                      libkf6xmlgui-dev \
+                      libkf6pty-dev \
+                      libkf6dbusaddons-dev \
+                      libkf6globalaccel-dev
+
+            - name: Install other dependencies
+              run: |
+                  sudo apt-get install -y \
+                      libicu-dev \
+                      zlib1g-dev
