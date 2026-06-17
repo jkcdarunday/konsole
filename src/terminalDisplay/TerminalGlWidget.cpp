@@ -219,8 +219,8 @@ void TerminalGlWidget::paintGL()
     // rendering fills the entire framebuffer on HiDPI displays.  On a 150 %
     // scaled monitor (DPR = 1.5) the framebuffer is 1.5× wider and taller
     // than width()/height() (which return logical pixels); using logical
-    // dimensions here would leave 56 % of the framebuffer black and make the
-    // terminal appear tiny.
+    // dimensions here would fill only ~44 % of the framebuffer (1/1.5²) and
+    // make the terminal appear tiny.
     const qreal dpr = devicePixelRatioF();
     const int vpW = qRound(width() * dpr);
     const int vpH = qRound(height() * dpr);
