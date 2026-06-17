@@ -207,7 +207,8 @@ void TerminalGlWidget::initializeGL()
     // QWidget::screenChanged was only added in Qt 6.7; use QWindow::screenChanged
     // via windowHandle() which works from Qt 5.0+.
     if (QWindow *win = windowHandle()) {
-        connect(win, &QWindow::screenChanged, this, &TerminalGlWidget::updateRenderTimerForScreen);
+        connect(win, &QWindow::screenChanged, this, &TerminalGlWidget::updateRenderTimerForScreen,
+                Qt::UniqueConnection);
     }
     updateRenderTimerForScreen(screen());
 }
