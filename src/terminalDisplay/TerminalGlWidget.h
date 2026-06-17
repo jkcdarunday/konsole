@@ -19,6 +19,7 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLVertexArrayObject>
 #include <QOpenGLWidget>
+#include <QTimer>
 #include <QVector>
 
 namespace Konsole
@@ -133,6 +134,23 @@ private:
     QFont m_lastFont; ///< Last base font set; used to detect font changes
 
     bool m_dataReady = false;
+    /** Set to true when new display data has arrived but not yet been rendered. */
+    bool m_dataDirty = false;
+
+    // -----------------------------------------------------------------------
+    // Screen-rate render loop
+    // -----------------------------------------------------------------------
+
+    /**
+     * Timer that fires at the connected screen's refresh rate and calls
+     * update() whenever m_dataDirty is set.  This ensures paintGL() is
+     * scheduled at the monitor's native rate (e.g. 120 Hz) rather than
+     * at the terminal emulation's bulk-output rate.
+     */
+    QTimer *m_renderTimer = nullptr;
+
+    /** Update the render-timer interval to match @p newScreen's refresh rate. */
+    void updateRenderTimerForScreen(QScreen *newScreen);
 
     // -----------------------------------------------------------------------
     // Helpers

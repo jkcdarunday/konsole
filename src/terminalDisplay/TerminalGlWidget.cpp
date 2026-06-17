@@ -13,6 +13,7 @@
 
 #include <QDebug>
 #include <QRawFont>
+#include <QScreen>
 #include <cstddef>
 
 namespace Konsole
@@ -136,7 +137,27 @@ TerminalGlWidget::TerminalGlWidget(QWidget *parent)
     QSurfaceFormat fmt;
     fmt.setVersion(3, 3);
     fmt.setProfile(QSurfaceFormat::CoreProfile);
+    // Synchronise buffer swaps with the display's vertical blank so that
+    // rendering is capped at the monitor's native refresh rate.
+    fmt.setSwapInterval(1);
     setFormat(fmt);
+
+    // Drive rendering at the screen's native refresh rate.  We use a
+    // PreciseTimer so the interval is as close to the screen period as the
+    // platform allows.  The timer only schedules an update when new data is
+    // actually available (m_dataDirty), so it is cheap when the terminal is
+    // idle.
+    m_renderTimer = new QTimer(this);
+    m_renderTimer->setTimerType(Qt::PreciseTimer);
+    connect(m_renderTimer, &QTimer::timeout, this, [this]() {
+        if (m_dataDirty) {
+            update();
+        }
+    });
+
+    // Re-calculate the timer interval whenever the widget moves to a
+    // different screen (e.g. dragging to a 120 Hz monitor from a 60 Hz one).
+    connect(this, &QWidget::screenChanged, this, &TerminalGlWidget::updateRenderTimerForScreen);
 }
 
 TerminalGlWidget::~TerminalGlWidget()
@@ -181,6 +202,10 @@ void TerminalGlWidget::initializeGL()
     m_glyphInstanceVbo.create();
 
     setupVaos();
+
+    // Start the screen-rate render timer now that we have a valid GL context.
+    // screen() is guaranteed to be non-null once the widget has been realised.
+    updateRenderTimerForScreen(screen());
 }
 
 void TerminalGlWidget::resizeGL(int /*w*/, int /*h*/)
@@ -190,12 +215,23 @@ void TerminalGlWidget::resizeGL(int /*w*/, int /*h*/)
 
 void TerminalGlWidget::paintGL()
 {
-    const int vpW = width();
-    const int vpH = height();
+    // Use the physical (device) pixel dimensions for the viewport so that
+    // rendering fills the entire framebuffer on HiDPI displays.  On a 150 %
+    // scaled monitor (DPR = 1.5) the framebuffer is 1.5× wider and taller
+    // than width()/height() (which return logical pixels); using logical
+    // dimensions here would leave 56 % of the framebuffer black and make the
+    // terminal appear tiny.
+    const qreal dpr = devicePixelRatioF();
+    const int vpW = qRound(width() * dpr);
+    const int vpH = qRound(height() * dpr);
 
     glViewport(0, 0, vpW, vpH);
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
+
+    // Mark this frame as consumed regardless of whether we draw anything so
+    // that the render timer does not keep re-scheduling empty paints.
+    m_dataDirty = false;
 
     if (!m_dataReady || m_bgInstances.isEmpty()) {
         return;
@@ -203,12 +239,16 @@ void TerminalGlWidget::paintGL()
 
     uploadInstanceData();
 
+    // Shader uniforms are in logical pixels.  The NDC calculation
+    //   ndc = px / viewSize * 2 - 1
+    // is device-independent: a point at (logicalW, logicalH) maps to NDC
+    // (1, 1) which glViewport then stretches to physical (vpW, vpH).
     const float fw = static_cast<float>(m_fontWidth);
     const float fh = static_cast<float>(m_fontHeight);
     const float ox = static_cast<float>(m_contentOffset.x());
     const float oy = static_cast<float>(m_contentOffset.y());
-    const float vw = static_cast<float>(vpW);
-    const float vh = static_cast<float>(vpH);
+    const float vw = static_cast<float>(width());
+    const float vh = static_cast<float>(height());
 
     // ------------------------------------------------------------------
     // Background pass
@@ -355,6 +395,7 @@ void TerminalGlWidget::updateDisplayData(const Character *image,
     }
 
     m_dataReady = true;
+    m_dataDirty = true;
     update();
 }
 
@@ -488,6 +529,23 @@ void TerminalGlWidget::uploadInstanceData()
         }
     }
     m_glyphInstanceVbo.release();
+}
+
+void TerminalGlWidget::updateRenderTimerForScreen(QScreen *newScreen)
+{
+    if (!m_renderTimer) {
+        return;
+    }
+
+    const qreal refreshRate = (newScreen && newScreen->refreshRate() > 0.0)
+        ? newScreen->refreshRate()
+        : 60.0;
+
+    // Convert Hz to milliseconds, clamped to at least 1 ms.
+    // QTimer::start(msec) both sets the interval and (re)starts the timer,
+    // so moving to a different-rate monitor takes effect immediately.
+    const int intervalMs = qMax(1, qRound(1000.0 / refreshRate));
+    m_renderTimer->start(intervalMs);
 }
 
 } // namespace Konsole
