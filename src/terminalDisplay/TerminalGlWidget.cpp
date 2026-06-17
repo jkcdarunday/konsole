@@ -14,6 +14,7 @@
 #include <QDebug>
 #include <QRawFont>
 #include <QScreen>
+#include <QSurfaceFormat>
 #include <cstddef>
 
 namespace Konsole

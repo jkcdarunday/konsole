@@ -11,6 +11,7 @@
 #include <QDebug>
 #include <QImage>
 #include <QOpenGLContext>
+#include <cstring>
 
 namespace Konsole
 {
