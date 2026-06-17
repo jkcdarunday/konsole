@@ -36,6 +36,7 @@
 #include <KNSWidgets/Button>
 
 // Konsole
+#include "config-konsole.h"
 #include "ui_EditProfileAdvancedPage.h"
 #include "ui_EditProfileAppearancePage.h"
 #include "ui_EditProfileGeneralPage.h"
@@ -568,6 +569,12 @@ void EditProfileDialog::setupGeneralPage(const Profile::Ptr &profile)
     auto *bellModeModel = new QStringListModel({i18n("System Bell"), i18n("System Notifications"), i18n("Visual Bell"), i18n("Ignore Bell Events")}, this);
     _generalUi->terminalBellCombo->setModel(bellModeModel);
     _generalUi->terminalBellCombo->setCurrentIndex(profile->property<int>(Profile::BellMode));
+    _generalUi->useGpuAccelerationButton->setChecked(profile->property<bool>(Profile::UseGpuAcceleration));
+#if !HAVE_OPENGL
+    _generalUi->useGpuAccelerationButton->setChecked(false);
+    _generalUi->useGpuAccelerationButton->setEnabled(false);
+    _generalUi->useGpuAccelerationButton->setToolTip(i18n("OpenGL support is not available in this build."));
+#endif
 
     _isDefault = profile == ProfileManager::instance()->defaultProfile();
     _generalUi->setAsDefaultButton->setChecked(_isDefault);
@@ -599,6 +606,9 @@ void EditProfileDialog::setupGeneralPage(const Profile::Ptr &profile)
 
     connect(_generalUi->terminalBellCombo, &QComboBox::currentIndexChanged, this, [this](const int index) {
         updateTempProfileProperty(Profile::BellMode, index);
+    });
+    connect(_generalUi->useGpuAccelerationButton, &QCheckBox::toggled, this, [this](const bool checked) {
+        updateTempProfileProperty(Profile::UseGpuAcceleration, checked);
     });
 
     connect(_generalUi->setAsDefaultButton, &QAbstractButton::toggled, this, &Konsole::EditProfileDialog::updateButtonApply);
