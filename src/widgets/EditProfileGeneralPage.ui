@@ -422,6 +422,16 @@
          </item>
         </layout>
        </item>
+       <item row="14" column="1" colspan="2">
+        <widget class="QCheckBox" name="useGpuAccelerationButton">
+         <property name="toolTip">
+          <string>Render terminal text and backgrounds using OpenGL for lower CPU usage on busy terminals</string>
+         </property>
+         <property name="text">
+          <string>Use GPU accelerated rendering (OpenGL)</string>
+         </property>
+        </widget>
+       </item>
       </layout>
      </widget>
      <widget class="QWidget" name="semantic">

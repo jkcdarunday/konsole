@@ -48,6 +48,16 @@ find_package(Qt6 ${QT_MIN_VERSION} CONFIG REQUIRED
     Widgets
 )
 
+# Optional GPU acceleration via OpenGL
+find_package(Qt6 ${QT_MIN_VERSION} CONFIG OPTIONAL_COMPONENTS OpenGL OpenGLWidgets)
+if(Qt6OpenGL_FOUND AND Qt6OpenGLWidgets_FOUND)
+    set(HAVE_OPENGL 1)
+    message(STATUS "Qt6 OpenGL found — building with GPU-accelerated terminal rendering")
+else()
+    set(HAVE_OPENGL 0)
+    message(STATUS "Qt6 OpenGL not found — GPU acceleration disabled")
+endif()
+
 find_package(KF6 ${KF6_DEP_VERSION} REQUIRED
     Bookmarks
     Config
