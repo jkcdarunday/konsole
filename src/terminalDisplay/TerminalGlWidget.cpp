@@ -15,6 +15,7 @@
 #include <QRawFont>
 #include <QScreen>
 #include <QSurfaceFormat>
+#include <QWindow>
 #include <cstddef>
 
 namespace Konsole
@@ -156,9 +157,6 @@ TerminalGlWidget::TerminalGlWidget(QWidget *parent)
         }
     });
 
-    // Re-calculate the timer interval whenever the widget moves to a
-    // different screen (e.g. dragging to a 120 Hz monitor from a 60 Hz one).
-    connect(this, &QWidget::screenChanged, this, &TerminalGlWidget::updateRenderTimerForScreen);
 }
 
 TerminalGlWidget::~TerminalGlWidget()
@@ -206,6 +204,11 @@ void TerminalGlWidget::initializeGL()
 
     // Start the screen-rate render timer now that we have a valid GL context.
     // screen() is guaranteed to be non-null once the widget has been realised.
+    // QWidget::screenChanged was only added in Qt 6.7; use QWindow::screenChanged
+    // via windowHandle() which works from Qt 5.0+.
+    if (QWindow *win = windowHandle()) {
+        connect(win, &QWindow::screenChanged, this, &TerminalGlWidget::updateRenderTimerForScreen);
+    }
     updateRenderTimerForScreen(screen());
 }
 
