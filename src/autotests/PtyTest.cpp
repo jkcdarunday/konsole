@@ -10,6 +10,7 @@
 // Qt
 #include <QSize>
 #include <QStringList>
+#include <QTemporaryFile>
 #include <QTest>
 
 using namespace Konsole;
@@ -79,6 +80,39 @@ void PtyTest::testRunProgram()
     // QSKIP("This often fails on multiple CIs", SkipSingle);
     //QCOMPARE(fpg, pid);
     pty.close();
+}
+
+void PtyTest::testBurstRead()
+{
+#ifdef Q_OS_WIN
+    QSKIP("This test uses a POSIX PTY");
+#else
+    QTemporaryFile file;
+    QVERIFY(file.open());
+    QByteArray expected;
+    for (int i = 0; i < 8192; ++i) {
+        expected += QByteArray::number(i) + ":0123456789abcdef;";
+    }
+    QCOMPARE(file.write(expected), qint64(expected.size()));
+    QVERIFY(file.flush());
+
+    Pty pty;
+    pty.setUseUtmp(false);
+    QByteArray received;
+    bool receiving = false;
+    bool recursive = false;
+    connect(&pty, &Pty::receivedData, this, [&](const char *data, int size) {
+        recursive |= receiving;
+        receiving = true;
+        received.append(data, size);
+        receiving = false;
+    });
+    QCOMPARE(pty.start(QStringLiteral("/bin/cat"), {file.fileName()}, {}), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(received.size(), expected.size(), 5000);
+    QCOMPARE(received, expected);
+    QVERIFY(!recursive);
+    QTRY_COMPARE(pty.state(), QProcess::NotRunning);
+#endif
 }
 
 QTEST_GUILESS_MAIN(PtyTest)

@@ -143,7 +143,8 @@ private:
                             RenditionFlags &oldRendition,
                             QColor oldColor,
                             QFont::Weight normalWeight,
-                            QFont::Weight boldWeight);
+                            QFont::Weight boldWeight,
+                            bool fixedCells = false);
     void updateCursorAnimation(const QVariant &value);
     void onCursorPositionChanged(const QRectF &oldRect, const QRectF &newRect);
     QVariantAnimation *m_cursorAnim;

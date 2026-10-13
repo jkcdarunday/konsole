@@ -25,6 +25,7 @@ private Q_SLOTS:
     void testWindowSize();
 
     void testRunProgram();
+    void testBurstRead();
 };
 
 }

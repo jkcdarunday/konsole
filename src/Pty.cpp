@@ -10,6 +10,8 @@
 #include "konsoledebug.h"
 
 // Qt
+#include <QElapsedTimer>
+#include <QScopedValueRollback>
 #include <QStringList>
 #include <qplatformdefs.h>
 
@@ -18,6 +20,7 @@
 // System
 #include <csignal>
 #include <errno.h>
+#include <poll.h>
 #include <sys/ioctl.h> //ioctl() and TIOCSWINSZ
 #include <termios.h>
 
@@ -115,7 +118,49 @@ void Pty::sendData(const QByteArray &data)
 
 void Pty::dataReceived()
 {
-    QByteArray data = pty()->readAll();
+    if (_readingData) {
+        return;
+    }
+    QByteArray data;
+    {
+        QScopedValueRollback<bool> reading(_readingData, true);
+        data = pty()->readAll();
+#if defined(FIONREAD)
+        // The PTY often exposes a burst in small blocks. Drain data already
+        // ready before letting an expensive frame interrupt the next read.
+        // Small interactive writes stay immediate. For a burst, allow at most
+        // a millisecond for a woken producer to refill the kernel buffer.
+        // Bound both bytes and time so continuous output cannot monopolize I/O.
+        QElapsedTimer budget;
+        budget.start();
+        while (!data.isEmpty() && data.size() < 256 * 1024 && budget.nsecsElapsed() < 1000000) {
+            int available = 0;
+            if (::ioctl(pty()->masterFd(), FIONREAD, &available) != 0) {
+                break;
+            }
+            if (available <= 0 && data.size() >= 4096) {
+                pollfd ready{pty()->masterFd(), POLLIN, 0};
+#if defined(Q_OS_LINUX)
+                const timespec timeout{0, static_cast<long>(qMax(qint64(0), qint64(1000000) - budget.nsecsElapsed()))};
+                const int readyCount = ::ppoll(&ready, 1, &timeout, nullptr);
+#else
+                const int readyCount = ::poll(&ready, 1, 1);
+#endif
+                if (readyCount <= 0 || !(ready.revents & POLLIN) || ::ioctl(pty()->masterFd(), FIONREAD, &available) != 0) {
+                    break;
+                }
+            }
+            if (available <= 0 || !pty()->waitForReadyRead(0)) {
+                break;
+            }
+            const QByteArray next = pty()->readAll();
+            if (next.isEmpty()) {
+                break;
+            }
+            data += next;
+        }
+#endif
+    }
     if (data.isEmpty()) {
         return;
     }

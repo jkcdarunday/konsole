@@ -238,6 +238,7 @@ private:
     bool _xon;
     bool _utf8;
     int _shellProcessId = 0;
+    bool _readingData = false;
 #ifdef Q_OS_WIN
     std::unique_ptr<IPtyProcess> m_proc;
 #else

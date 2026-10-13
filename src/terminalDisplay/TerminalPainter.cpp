@@ -23,6 +23,8 @@
 #include <QColor>
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QFontMetricsF>
+#include <QPaintEngine>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPen>
@@ -284,6 +286,11 @@ void TerminalPainter::drawContents(Character *image,
     const QFont::Weight boldWeight = it != std::end(FontWeights) ? *it : QFont::Black;
     paint.setLayoutDirection(Qt::LeftToRight);
     const QColor *colorTable = m_parentDisplay->terminalColor()->colorTable();
+    const QFontMetricsF cellMetrics(paint.font(), paint.device());
+    const auto engineType = paint.paintEngine()->type();
+    const bool gpuPainter = engineType == QPaintEngine::User || engineType == QPaintEngine::OpenGL || engineType == QPaintEngine::OpenGL2;
+    const bool batchCells = m_parentDisplay->usesGpuRendering() && gpuPainter && !wordMode
+        && qAbs(cellMetrics.horizontalAdvance(QLatin1Char('i')) - cellMetrics.horizontalAdvance(QLatin1Char('W'))) < 0.001;
 
     for (int y = rect.y(); y <= rect.bottom(); y++) {
         int pos = m_parentDisplay->loc(0, y);
@@ -473,7 +480,23 @@ void TerminalPainter::drawContents(Character *image,
                         continue;
                     }
                 }
-                const QRect textAreaOneChar(textScale.inverted().map(QPoint(textX, textY)), QSize(textWidth, textHeight));
+                int cells = 1;
+                if (batchCells && !shaped && !doubleWidth && !char_value.rendition.f.cursor && !char_value.rendition.f.extended
+                    && !(char_value.flags & EF_EMOJI_REPRESENTATION) && unistr.size() == 1 && char_value.character >= 32 && char_value.character < 127) {
+                    // Batch before QPainter shapes text, rather than reshaping
+                    // every individual cell and only batching its GPU nodes.
+                    while (x + cells <= qMin(right, lastNonSpace)) {
+                        const int nextLog = vis2log(x + cells);
+                        const Character &next = image[pos + nextLog];
+                        if (nextLog != log_x + cells || next.character < 32 || next.character >= 127 || next.rendition.all != char_value.rendition.all
+                            || !next.hasSameColors(char_value) || ((next.flags ^ char_value.flags) & (EF_REPL | EF_EMOJI_REPRESENTATION))) {
+                            break;
+                        }
+                        unistr += QChar(ushort(next.character));
+                        ++cells;
+                    }
+                }
+                const QRect textAreaOneChar(textScale.inverted().map(QPoint(textX, textY)), QSize(textWidth * cells, textHeight));
                 drawTextCharacters(paint,
                                    textAreaOneChar,
                                    unistr,
@@ -485,7 +508,9 @@ void TerminalPainter::drawContents(Character *image,
                                    oldRendition,
                                    oldColor,
                                    normalWeight,
-                                   boldWeight);
+                                   boldWeight,
+                                   cells > 1);
+                x += cells - 1;
             }
         }
         if (wordMode && lastCharType != 0) {
@@ -1150,7 +1175,8 @@ void TerminalPainter::drawTextCharacters(QPainter &painter,
                                          RenditionFlags &oldRendition,
                                          QColor oldColor,
                                          QFont::Weight normalWeight,
-                                         QFont::Weight boldWeight)
+                                         QFont::Weight boldWeight,
+                                         bool fixedCells)
 {
     // setup painter
     if (style.rendition.f.conceal != 0) {
@@ -1258,6 +1284,19 @@ void TerminalPainter::drawTextCharacters(QPainter &painter,
         } else {
             // We shift half way down here to center
             y += m_parentDisplay->terminalFont()->lineSpacing() / 2;
+        }
+        if (fixedCells) {
+            // WordMode=false must retain independent glyphs and exact cell
+            // positions, including with fractional font metrics and ligatures.
+            savedFont = painter.font();
+            restoreFont = true;
+            QFont cellFont = savedFont;
+            cellFont.setKerning(false);
+            cellFont.setStyleStrategy(QFont::StyleStrategy(cellFont.styleStrategy() | QFont::PreferNoShaping));
+            cellFont.setLetterSpacing(QFont::AbsoluteSpacing, 0);
+            const QFontMetricsF metrics(cellFont, painter.device());
+            cellFont.setLetterSpacing(QFont::AbsoluteSpacing, m_parentDisplay->terminalFont()->fontWidth() - metrics.horizontalAdvance(QLatin1Char('M')));
+            painter.setFont(cellFont);
         }
         painter.drawText(rect.x(), y, text);
         if (0 && text.toUcs4().length() >= 1) {
