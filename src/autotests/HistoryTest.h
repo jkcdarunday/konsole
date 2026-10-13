@@ -31,6 +31,10 @@ private Q_SLOTS:
     void testHistoryScroll();
     void testHistoryReflow();
     void testHistoryTypeChange();
+    void testHistoryRollover_data();
+    void testHistoryRollover();
+    void testHistoryReflowAfterRollover();
+    void testHistoryZeroCapacity();
 
 private:
     static constexpr const char testString[] = "abcdefghijklmnopqrstuvwxyz1234567890";

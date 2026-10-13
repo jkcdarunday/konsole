@@ -218,6 +218,106 @@ void HistoryTest::testHistoryTypeChange()
     QCOMPARE(historyScroll->getLines(), 0);
 }
 
+void HistoryTest::testHistoryRollover_data()
+{
+    QTest::addColumn<bool>("moveCells");
+    QTest::newRow("copy") << false;
+    QTest::newRow("move") << true;
+}
+
+void HistoryTest::testHistoryRollover()
+{
+    QFETCH(bool, moveCells);
+    constexpr int capacity = 64;
+    CompactHistoryScroll history(capacity);
+    for (int line = 0; line < 512; ++line) {
+        const int length = line % 7 + 1;
+        Character cells[7];
+        for (int column = 0; column < length; ++column) {
+            cells[column] = Character(uint(1000 + line * 8 + column));
+        }
+        if (moveCells) {
+            history.addCellsMove(cells, length);
+        } else {
+            history.addCells(cells, length);
+        }
+        const LineProperty property(line % 3 == 0 ? LINE_WRAPPED : 0, length, line);
+        history.addLine(property);
+        const int retained = qMin(line + 1, capacity);
+        QCOMPARE(history.getLines(), retained);
+        for (int row = 0; row < retained; ++row) {
+            const int original = line - retained + 1 + row;
+            const int expectedLength = original % 7 + 1;
+            QCOMPARE(history.getLineLen(row), expectedLength);
+            QCOMPARE(history.isWrappedLine(row), original % 3 == 0);
+            QCOMPARE(history.getLineProperty(row).counter, original);
+            QCOMPARE(history.getLineProperty(row).length, expectedLength);
+            Character actual[7];
+            history.getCells(row, 0, expectedLength, actual);
+            for (int column = 0; column < expectedLength; ++column) {
+                QCOMPARE(actual[column].character, uint(1000 + original * 8 + column));
+            }
+        }
+    }
+    history.setMaxNbLines(17);
+    QCOMPARE(history.getLines(), 17);
+    QCOMPARE(history.getLineProperty(0).counter, 495);
+    history.removeCells();
+    QCOMPARE(history.getLines(), 16);
+    const Character replacement(uint('Z'));
+    history.addCells(&replacement, 1);
+    history.addLine();
+    QCOMPARE(history.getLines(), 17);
+    Character actual;
+    history.getCells(16, 0, 1, &actual);
+    QCOMPARE(actual, replacement);
+}
+
+void HistoryTest::testHistoryReflowAfterRollover()
+{
+    CompactHistoryScroll history(3);
+    for (int line = 0; line < 4; ++line) {
+        const Character cells[] = {Character(uint('A' + line * 2)), Character(uint('B' + line * 2))};
+        history.addCells(cells, 2);
+        history.addLine(LineProperty(line < 2 ? LINE_WRAPPED : 0));
+    }
+    QCOMPARE(history.getLines(), 3);
+    QCOMPARE(history.reflowLines(4), 0);
+    QCOMPARE(history.getLines(), 2);
+    QCOMPARE(history.getLineLen(0), 4);
+    Character joined[4];
+    history.getCells(0, 0, 4, joined);
+    for (int column = 0; column < 4; ++column) {
+        QCOMPARE(joined[column].character, uint('C' + column));
+    }
+    QCOMPARE(history.reflowLines(1), 3);
+    QCOMPARE(history.getLines(), 3);
+    for (int line = 0; line < 3; ++line) {
+        QCOMPARE(history.getLineLen(line), 1);
+        Character actual;
+        history.getCells(line, 0, 1, &actual);
+        QCOMPARE(actual.character, uint('F' + line));
+    }
+}
+
+void HistoryTest::testHistoryZeroCapacity()
+{
+    CompactHistoryScroll history(0);
+    Character cell(uint('A'));
+    history.addCells(&cell, 1);
+    history.addLine();
+    QCOMPARE(history.getLines(), 0);
+    history.setMaxNbLines(1);
+    history.addCellsMove(&cell, 1);
+    history.addLine();
+    QCOMPARE(history.getLines(), 1);
+    history.setMaxNbLines(0);
+    QCOMPARE(history.getLines(), 0);
+    history.addCellsMove(&cell, 1);
+    history.addLine();
+    QCOMPARE(history.getLines(), 0);
+}
+
 QTEST_MAIN(HistoryTest)
 
 #include "moc_HistoryTest.cpp"

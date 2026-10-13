@@ -52,8 +52,8 @@ private:
      * value of _indexBias corresponds to _cells' zero index.
      *
      * The use of a biased line start means we don't need to traverse the
-     * vector recalculating line starts when removing lines from the top, and
-     * also we don't need to traverse the vector to compute the start of a line
+     * buffer recalculating line starts when removing lines from the top, and
+     * also we don't need to traverse the buffer to compute the start of a line
      * as we would have to do if we stored line lengths.
      *
      * unsigned int means we're limited in common architectures to 4 million
@@ -70,7 +70,9 @@ private:
      * This buffer contains the data about each line
      * The size of this buffer is the number of lines we have.
      */
-    std::vector<LineData> _lineDatas;
+    // Evicting the oldest line must not move every retained line's metadata.
+    // A deque keeps indexed lookup and insertion/removal at both ends cheap.
+    std::deque<LineData> _lineDatas;
     unsigned int _indexBias = 0;
 
     /**

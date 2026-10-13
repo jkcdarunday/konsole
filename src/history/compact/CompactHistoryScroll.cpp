@@ -40,7 +40,7 @@ void CompactHistoryScroll::addCells(const Character a[], const int count)
     // the flag is later updated when addLine is called
     _lineDatas.push_back({static_cast<unsigned int>(_cells.size() + _indexBias), LineProperty()});
 
-    if (_lineDatas.size() > _maxLineCount + 1) {
+    if (_lineDatas.size() > _maxLineCount) {
         removeLinesFromTop(1);
     }
 }
@@ -53,13 +53,16 @@ void CompactHistoryScroll::addCellsMove(Character characters[], const int count)
     // the flag is later updated when addLine is called
     _lineDatas.push_back({static_cast<unsigned int>(_cells.size() + _indexBias), LineProperty()});
 
-    if (_lineDatas.size() > _maxLineCount + 1) {
+    if (_lineDatas.size() > _maxLineCount) {
         removeLinesFromTop(1);
     }
 }
 
 void CompactHistoryScroll::addLine(const LineProperty lineProperty)
 {
+    if (_lineDatas.empty()) {
+        return;
+    }
     auto &flag = _lineDatas.back().flag;
     flag = lineProperty;
 }
@@ -148,12 +151,12 @@ void CompactHistoryScroll::setLineProperty(const int lineNumber, LineProperty pr
 
 int CompactHistoryScroll::reflowLines(const int columns, std::map<int, int> *deltas)
 {
-    std::vector<LineData> newLineData;
+    std::deque<LineData> newLineData;
 
     auto reflowLineLen = [](int start, int end) {
         return end - start;
     };
-    auto setNewLine = [](std::vector<LineData> &change, unsigned int index, LineProperty flag) {
+    auto setNewLine = [](std::deque<LineData> &change, unsigned int index, LineProperty flag) {
         change.push_back({index, flag});
     };
 
