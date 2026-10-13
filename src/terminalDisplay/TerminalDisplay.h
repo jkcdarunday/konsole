@@ -11,6 +11,7 @@
 // Qt
 #include <QColor>
 #include <QPointer>
+#include <QRegion>
 #include <QWidget>
 
 #include <memory>
@@ -48,6 +49,8 @@ struct UBiDi;
 namespace Konsole
 {
 class TerminalPainter;
+class TerminalRenderSurface;
+class TerminalVulkanSurface;
 class TerminalScrollBar;
 class TerminalColor;
 class TerminalFont;
@@ -89,6 +92,18 @@ public:
     explicit TerminalDisplay(QWidget *parent = nullptr);
     ~TerminalDisplay() override;
 
+    /** True when terminal painting uses a GPU surface. */
+    bool usesGpuRendering() const;
+    bool scrollGpuImage(int lines, const QRect &region);
+
+public Q_SLOTS:
+    // Forward terminal damage to the render surface while keeping QWidget's API.
+    void update();
+    void update(const QRect &rect);
+    void update(const QRegion &region);
+    void update(int x, int y, int width, int height);
+
+public:
     void showDragTarget(const QPoint &cursorPos);
     void hideDragTarget();
 
@@ -634,6 +649,15 @@ private Q_SLOTS:
 
 private:
     Q_DISABLE_COPY(TerminalDisplay)
+
+    friend class TerminalRenderSurface;
+    friend class TerminalVulkanSurface;
+    void paintTerminal(QPainter &paint, const QRegion &region);
+    void disableGpuRendering();
+    TerminalRenderSurface *_renderSurface = nullptr;
+    TerminalVulkanSurface *_vulkanSurface = nullptr;
+    bool _gpuBackingStoreDirty = true;
+    QRegion _gpuOverlayRegion;
 
     // the area where the preedit string for input methods will be draw
     QRect preeditRect() const;

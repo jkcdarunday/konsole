@@ -66,8 +66,12 @@ TerminalPainter::TerminalPainter(TerminalDisplay *parent)
 }
 void TerminalPainter::updateCursorAnimation(const QVariant &value)
 {
+    const QRect previous = m_animatedCursorPolygon.boundingRect().toAlignedRect();
     m_animatedCursorPolygon = value.value<QPolygonF>();
-    m_parentDisplay->update();
+    // The renderer encounters the cursor at its target cell even while the
+    // animated polygon is between cells, so include that cell in the damage.
+    const QRect cursorCell = m_parentDisplay->imageToWidget(QRect(m_parentDisplay->cursorPosition(), QSize(1, 1)));
+    m_parentDisplay->update(highdpi_adjust_rect(previous | m_animatedCursorPolygon.boundingRect().toAlignedRect() | cursorCell));
 }
 QPolygonF createDynamicPolygon(const QRectF &rect, qreal shear, qreal taper)
 {

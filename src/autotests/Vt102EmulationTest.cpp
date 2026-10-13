@@ -463,6 +463,25 @@ void Vt102EmulationTest::testBufferedUpdates()
     QCOMPARE(outputChangedSpy.count(), 2);
 }
 
+void Vt102EmulationTest::testContinuousOutputUpdates()
+{
+    TestEmulation em;
+    em.reset();
+    QSignalSpy updates(&em, &TestEmulation::outputChanged);
+    QTimer input;
+    input.setTimerType(Qt::PreciseTimer);
+    connect(&input, &QTimer::timeout, &em, [&em] {
+        em.receiveData("x", 1);
+    });
+    input.start(1);
+    QTest::qWait(120);
+    input.stop();
+
+    // Without an attached display the scheduler uses 60 Hz. The old 40 ms
+    // debounce cap only delivered three updates during this continuous stream.
+    QVERIFY2(updates.count() >= 5, "Continuous input postponed terminal updates");
+}
+
 void Vt102EmulationTest::testKittyKeyboardPushPopQuery()
 {
     TestEmulation em;

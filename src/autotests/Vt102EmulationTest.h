@@ -33,6 +33,7 @@ private Q_SLOTS:
     void testTokenizingVT52();
 
     void testBufferedUpdates();
+    void testContinuousOutputUpdates();
 
     void testKittyKeyboardPushPopQuery();
     void testKittyKeyboardSet();

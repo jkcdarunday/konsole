@@ -24,6 +24,14 @@
 #include <QStandardPaths>
 #include <qplatformdefs.h>
 
+#if HAVE_VULKAN_RENDERER
+#include <QQuickWindow>
+#if QT_CONFIG(vulkan)
+#include <QVulkanFunctions>
+#include <QVulkanInstance>
+#endif
+#endif
+
 // KF
 #include <KAboutData>
 #include <KCrash>
@@ -154,6 +162,20 @@ int main(int argc, char *argv[])
 #endif
 
     auto app = new QApplication(argc, argv);
+
+#if HAVE_VULKAN_RENDERER && QT_CONFIG(vulkan)
+    // Select before the first Quick surface is created. Respect an explicit
+    // scene graph backend and keep embedded Konsole parts on their host's API.
+    const QByteArray renderer = qgetenv("KONSOLE_RENDERER");
+    if (qEnvironmentVariableIsEmpty("QSG_RHI_BACKEND") && (renderer.isEmpty() || renderer == "vulkan")
+        && (QGuiApplication::platformName() == QLatin1String("wayland") || QGuiApplication::platformName() == QLatin1String("xcb"))) {
+        QVulkanInstance probe;
+        uint32_t devices = 0;
+        if (probe.create() && probe.functions()->vkEnumeratePhysicalDevices(probe.vkInstance(), &devices, nullptr) == VK_SUCCESS && devices > 0) {
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::Vulkan);
+        }
+    }
+#endif
 
     /**
      * trigger initialisation of proper application style

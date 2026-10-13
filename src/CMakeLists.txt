@@ -165,6 +165,7 @@ target_sources(konsoleprivate PRIVATE
     terminalDisplay/extras/HighlightScrolledLines.cpp
 
     terminalDisplay/TerminalDisplay.cpp
+    terminalDisplay/TerminalRenderSurface.cpp
     terminalDisplay/TerminalPainter.cpp
     terminalDisplay/TerminalScrollBar.cpp
     terminalDisplay/TerminalColor.cpp
@@ -237,6 +238,11 @@ ki18n_wrap_ui(konsoleprivate
 
 generate_export_header(konsoleprivate)
 
+if(HAVE_VULKAN_RENDERER)
+    target_sources(konsoleprivate PRIVATE terminalDisplay/TerminalVulkanSurface.cpp)
+    target_link_libraries(konsoleprivate PRIVATE Qt::QuickWidgets Qt6::QuickWidgetsPrivate)
+endif()
+
 if(KONSOLE_HAVE_XKBCOMMON)
     target_compile_definitions(konsoleprivate PUBLIC HAVE_XKBCOMMON)
     target_include_directories(konsoleprivate PUBLIC ${XKBCOMMON_INCLUDE_DIRS})
@@ -266,6 +272,7 @@ target_link_libraries(konsoleprivate
         KF6::TextWidgets
         KF6::WindowSystem
         Qt::Multimedia
+        Qt::OpenGLWidgets
         Qt::PrintSupport
         Qt::Xml
         ICU::uc
@@ -348,6 +355,10 @@ ecm_add_app_icon(ICONS_SOURCES ICONS ${ICONS_SRCS})
 add_executable(konsole
     main.cpp
 )
+
+if(HAVE_VULKAN_RENDERER)
+    target_link_libraries(konsole Qt::Quick)
+endif()
 
 target_link_libraries(konsole
     konsoleprivate

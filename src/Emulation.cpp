@@ -11,6 +11,8 @@
 
 // Qt
 #include <QKeyEvent>
+#include <QScreen>
+#include <cmath>
 
 // Konsole
 #include "KonsoleSettings.h"
@@ -30,6 +32,9 @@ Emulation::Emulation()
 
     QObject::connect(&_bulkTimer1, &QTimer::timeout, this, &Konsole::Emulation::showBulk);
     QObject::connect(&_bulkTimer2, &QTimer::timeout, this, &Konsole::Emulation::showBulk);
+    _bulkTimer1.setSingleShot(true);
+    _bulkTimer1.setTimerType(Qt::PreciseTimer);
+    _bulkTimer2.setSingleShot(true);
 
     // listen for mouse status changes
     connect(this, &Konsole::Emulation::programRequestsMouseTracking, this, &Konsole::Emulation::setUsesMouseTracking);
@@ -89,6 +94,10 @@ ScreenWindow *Emulation::createWindow()
 
 void Emulation::setCurrentTerminalDisplay(TerminalDisplay *display)
 {
+    _displays.removeAll(nullptr);
+    if (display && !_displays.contains(display)) {
+        _displays.append(display);
+    }
     _screen[0]->setCurrentTerminalDisplay(display);
     _screen[1]->setCurrentTerminalDisplay(display);
 }
@@ -307,6 +316,7 @@ void Emulation::showBulk()
 
     _bulkTimer1.stop();
     _bulkTimer2.stop();
+    _lastUpdate.start();
 
     Q_EMIT updateDroppedLines(_currentScreen->fastDroppedLines() + _currentScreen->droppedLines());
     Q_EMIT outputChanged();
@@ -320,14 +330,27 @@ void Emulation::bufferedUpdate()
     if (_synchronizedUpdate)
         return;
 
-    static const int BULK_TIMEOUT1 = 10;
-    static const int BULK_TIMEOUT2 = 40;
-
-    _bulkTimer1.setSingleShot(true);
-    _bulkTimer1.start(BULK_TIMEOUT1);
-    if (!_bulkTimer2.isActive()) {
-        _bulkTimer2.setSingleShot(true);
-        _bulkTimer2.start(BULK_TIMEOUT2);
+    // Never restart an outstanding update on incoming data: a busy PTY must
+    // not postpone presentation. Use the fastest visible screen for sessions
+    // with multiple views; querying here also handles moving between monitors.
+    if (!_bulkTimer1.isActive()) {
+        qreal refreshRate = 0;
+        for (const auto &display : std::as_const(_displays)) {
+            if (display && display->isVisible() && display->screen()) {
+                const qreal rate = display->screen()->refreshRate();
+                if (std::isfinite(rate) && rate > 0) {
+                    refreshRate = qMax(refreshRate, rate);
+                }
+            }
+        }
+        if (refreshRate == 0) {
+            refreshRate = 60;
+        }
+        // Round down so work is ready before the next vsync, including on
+        // fractional refresh rates. The compositor controls final presentation.
+        const int frameInterval = qMax(1, int(1000.0 / refreshRate));
+        const int delay = _lastUpdate.isValid() ? qMax(0, frameInterval - int(_lastUpdate.elapsed())) : 0;
+        _bulkTimer1.start(delay);
     }
 }
 

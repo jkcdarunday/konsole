@@ -106,8 +106,8 @@ void TerminalInterfaceTest::testTerminalInterface()
     // Start a shell in given directory
     terminal->showShellInDir(QDir::home().path());
 
-    int foregroundProcessId = terminal->foregroundProcessId();
-    QCOMPARE(foregroundProcessId, -1);
+    // Shell startup may run foreground commands before presenting its prompt.
+    QTRY_COMPARE(terminal->foregroundProcessId(), -1);
     QString foregroundProcessName = terminal->foregroundProcessName();
     QCOMPARE(foregroundProcessName, QString());
 
@@ -144,7 +144,7 @@ void TerminalInterfaceTest::testTerminalInterface()
 #endif
 
     // Nothing running in foreground
-    foregroundProcessId = terminal->foregroundProcessId();
+    const int foregroundProcessId = terminal->foregroundProcessId();
     QCOMPARE(foregroundProcessId, -1);
     foregroundProcessName = terminal->foregroundProcessName();
     QCOMPARE(foregroundProcessName, QString());

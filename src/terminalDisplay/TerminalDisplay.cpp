@@ -72,6 +72,11 @@
 #include "TerminalColor.h"
 #include "TerminalFonts.h"
 #include "TerminalPainter.h"
+#include "TerminalRenderSurface.h"
+#if HAVE_VULKAN_RENDERER
+#include "TerminalVulkanSurface.h"
+#include <QQuickWindow>
+#endif
 #include "TerminalScrollBar.h"
 
 #include "unicode/ubidi.h"
@@ -346,10 +351,34 @@ TerminalDisplay::TerminalDisplay(QWidget *parent)
         if (qAbs(currentCursorRect.x() - targetCursorRect.x()) < 0.1 && qAbs(currentCursorRect.y() - targetCursorRect.y()) < 0.1) { }
         update();
     });
+
+    // Headless Qt plugins cannot compose OpenGL widgets. Keep the raster path
+    // available there, and as an explicit driver troubleshooting override.
+    const auto platform = QGuiApplication::platformName();
+    if (qgetenv("KONSOLE_RENDERER") != "software" && platform != QLatin1String("offscreen") && platform != QLatin1String("minimal")) {
+#if HAVE_VULKAN_RENDERER
+        const auto graphicsApi = QQuickWindow::graphicsApi();
+        if ((graphicsApi != QSGRendererInterface::Unknown && graphicsApi != QSGRendererInterface::OpenGL && graphicsApi != QSGRendererInterface::Software)
+            || qgetenv("QSG_RHI_BACKEND") == "vulkan") {
+            _vulkanSurface = new TerminalVulkanSurface(this);
+            _vulkanSurface->setGeometry(rect());
+            _vulkanSurface->lower();
+        } else
+#endif
+        {
+            _renderSurface = new TerminalRenderSurface(this);
+            _renderSurface->setGeometry(rect());
+            _renderSurface->lower();
+        }
+    }
 }
 
 TerminalDisplay::~TerminalDisplay()
 {
+    delete _renderSurface;
+#if HAVE_VULKAN_RENDERER
+    delete _vulkanSurface;
+#endif
     disconnect(_blinkTextTimer);
     disconnect(_blinkCursorTimer);
 
@@ -357,6 +386,83 @@ TerminalDisplay::~TerminalDisplay()
     delete _filterChain;
 
     ubidi_close(ubidi);
+}
+
+bool TerminalDisplay::usesGpuRendering() const
+{
+    return _renderSurface != nullptr || _vulkanSurface != nullptr;
+}
+
+bool TerminalDisplay::scrollGpuImage(int lines, const QRect &region)
+{
+#if HAVE_VULKAN_RENDERER
+    if (_vulkanSurface) {
+        // Line metadata travels with the cached glyph row, just like the
+        // character image. Comparing unscrolled metadata marks every row dirty.
+        const int count = region.height() - qAbs(lines);
+        const int source = region.top() + qMax(0, lines);
+        const int destination = region.top() + qMax(0, -lines);
+        if (count > 0 && source + count <= _lineProperties.size() && destination + count <= _lineProperties.size()) {
+            const auto properties = _lineProperties.mid(source, count);
+            for (int i = 0; i < count; ++i) {
+                _lineProperties[destination + i] = properties[i];
+            }
+        }
+        _vulkanSurface->scrollImage(lines, region);
+        return true;
+    }
+#else
+    Q_UNUSED(lines)
+    Q_UNUSED(region)
+#endif
+    return false;
+}
+
+void TerminalDisplay::disableGpuRendering()
+{
+#if HAVE_VULKAN_RENDERER
+    if (_vulkanSurface) {
+        _vulkanSurface->hide();
+        _vulkanSurface->deleteLater();
+        _vulkanSurface = nullptr;
+    }
+#endif
+    if (_renderSurface) {
+        _renderSurface->hide();
+        _renderSurface->deleteLater();
+        _renderSurface = nullptr;
+    }
+    QWidget::update();
+}
+
+void TerminalDisplay::update()
+{
+    update(rect());
+}
+
+void TerminalDisplay::update(const QRect &rect)
+{
+    update(QRegion(rect));
+}
+
+void TerminalDisplay::update(const QRegion &region)
+{
+#if HAVE_VULKAN_RENDERER
+    if (_vulkanSurface) {
+        _vulkanSurface->scheduleUpdate(region);
+        return;
+    }
+#endif
+    if (_renderSurface) {
+        _renderSurface->scheduleUpdate(region);
+    } else {
+        QWidget::update(region);
+    }
+}
+
+void TerminalDisplay::update(int x, int y, int width, int height)
+{
+    update(QRect(x, y, width, height));
 }
 
 void TerminalDisplay::setupHeaderVisibility()
@@ -486,7 +592,8 @@ void TerminalDisplay::updateImage()
     // avoid expensive text drawing for parts of the image that
     // can simply be moved up or down
     // disable this shortcut for transparent konsole with scaled pixels, otherwise we get rendering artifacts, see BUG 350651
-    if (!(WindowSystemInfo::HAVE_TRANSPARENCY && (qApp->devicePixelRatio() > 1.0)) && _wallpaper->isNull() && !_searchBar->isVisible()) {
+    if ((_vulkanSurface || (!usesGpuRendering() && !(WindowSystemInfo::HAVE_TRANSPARENCY && (qApp->devicePixelRatio() > 1.0)))) && _wallpaper->isNull()
+        && !_searchBar->isVisible()) {
         // if the flow control warning is enabled this will interfere with the
         // scrolling optimizations and cause artifacts.  the simple solution here
         // is to just disable the optimization whilst it is visible
@@ -693,9 +800,7 @@ void TerminalDisplay::updateImage()
 
         Q_ASSERT(endDirtyIndex <= maxIndex);
         Q_ASSERT(endDirtyIndex >= startDirtyIndex);
-        const QString newText = screenWindow()->screen()->text(
-            *startDirtyIndex, *endDirtyIndex, Screen::PreserveLineBreaks | Screen::IgnoreBlockSelection
-        );
+        const QString newText = screenWindow()->screen()->text(*startDirtyIndex, *endDirtyIndex, Screen::PreserveLineBreaks | Screen::IgnoreBlockSelection);
         QAccessibleTextUpdateEvent textUpdateEvent(this, 0, QString(), newText);
         QAccessible::updateAccessibility(&textUpdateEvent);
     }
@@ -740,9 +845,40 @@ void TerminalDisplay::paintEvent(QPaintEvent *pe)
 
     QPainter paint(this);
 
+    if (usesGpuRendering()) {
+        // The terminal's alpha belongs to the GPU texture. Clear the underlying
+        // backing store once, then clear only raster widget overlays. Clearing
+        // a 4K backing store on every GPU frame wastes memory bandwidth.
+        QRegion overlays;
+        QWidget *surface = _renderSurface;
+#if HAVE_VULKAN_RENDERER
+        if (_vulkanSurface) {
+            surface = _vulkanSurface;
+        }
+#endif
+        for (QWidget *child : findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly)) {
+            if (child != surface && child->isVisible()) {
+                overlays |= child->geometry();
+            }
+        }
+        paint.setCompositionMode(QPainter::CompositionMode_Source);
+        const QRegion clear = _gpuBackingStoreDirty ? QRegion(rect()) : overlays | _gpuOverlayRegion;
+        for (const QRect &area : clear) {
+            paint.fillRect(area, Qt::transparent);
+        }
+        _gpuOverlayRegion = overlays;
+        _gpuBackingStoreDirty = false;
+        return;
+    }
+
+    paintTerminal(paint, pe->region());
+}
+
+void TerminalDisplay::paintTerminal(QPainter &paint, const QRegion &damage)
+{
     // Determine which characters should be repainted (1 region unit = 1 character)
     QRegion dirtyImageRegion;
-    const QRegion region = pe->region() & contentsRect();
+    const QRegion region = damage & contentsRect();
 
     for (const QRect &rect : region) {
         dirtyImageRegion += widgetToImage(rect);
@@ -751,6 +887,10 @@ void TerminalDisplay::paintEvent(QPaintEvent *pe)
         // This will result in repaint glitches iin wayland due to missing damage information
         const bool useOpacity = window() && window()->testAttribute(Qt::WA_TranslucentBackground);
         _terminalPainter->drawBackground(paint, rect, _terminalColor->backgroundColor(), useOpacity);
+    }
+
+    if (_screenWindow.isNull() || _image == nullptr) {
+        return;
     }
 
     if (_displayVerticalLine) {
@@ -1118,6 +1258,7 @@ void TerminalDisplay::updateCursor()
 
 void TerminalDisplay::resizeEvent(QResizeEvent *event)
 {
+    _gpuBackingStoreDirty = true;
     Q_UNUSED(event)
 
     if (contentsRect().isValid()) {
@@ -1136,6 +1277,16 @@ void TerminalDisplay::resizeEvent(QResizeEvent *event)
     _searchBar->move(x, y);
 
     _hoverLinkIndicator->move(0, height() - _hoverLinkIndicator->height());
+    if (_renderSurface) {
+        _renderSurface->setGeometry(rect());
+        _renderSurface->scheduleUpdate(rect());
+    }
+#if HAVE_VULKAN_RENDERER
+    if (_vulkanSurface) {
+        _vulkanSurface->setGeometry(rect());
+        _vulkanSurface->scheduleUpdate(rect());
+    }
+#endif
 }
 
 void TerminalDisplay::propagateSize()
@@ -1276,7 +1427,20 @@ QSize TerminalDisplay::sizeHint() const
 // the same signal as the one for a content size change
 void TerminalDisplay::showEvent(QShowEvent *)
 {
+    _gpuBackingStoreDirty = true;
     propagateSize();
+    // Displays are reparented into tab/split containers before they are shown.
+    // Ensure that their child surface is visible after that transition.
+    if (_renderSurface) {
+        _renderSurface->show();
+        _renderSurface->scheduleUpdate(rect());
+    }
+#if HAVE_VULKAN_RENDERER
+    if (_vulkanSurface) {
+        _vulkanSurface->show();
+        _vulkanSurface->scheduleUpdate(rect());
+    }
+#endif
     Q_EMIT changedContentSizeSignal(_contentRect.height(), _contentRect.width());
 }
 void TerminalDisplay::hideEvent(QHideEvent *)
@@ -1413,8 +1577,8 @@ void TerminalDisplay::mousePressEvent(QMouseEvent *ev)
     } else if (ev->button() == Qt::MiddleButton) {
         processMidButtonClick(ev);
     } else if (ev->button() == Qt::RightButton) {
-        if (usesMouseTracking() && !_readOnly && !ev->modifiers().testFlag(Qt::ShiftModifier) &&
-            (_rightClickPasteMode == Enum::RightClickPasteDisabled || ev->modifiers().testFlag(Qt::ControlModifier))) {
+        if (usesMouseTracking() && !_readOnly && !ev->modifiers().testFlag(Qt::ShiftModifier)
+            && (_rightClickPasteMode == Enum::RightClickPasteDisabled || ev->modifiers().testFlag(Qt::ControlModifier))) {
             // Send mouse signal to terminal if mouse tracking is enabled
             sendMouseSignal(mouseButton(2, ev->modifiers()), ev->pos(), 0, true);
         } else {
@@ -3109,6 +3273,14 @@ bool TerminalDisplay::event(QEvent *event)
             _terminalColor->onColorsChanged();
         }
         break;
+    case QEvent::FontChange:
+    case QEvent::StyleChange:
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+    case QEvent::DevicePixelRatioChange:
+#endif
+        _gpuBackingStoreDirty = true;
+        update();
+        break;
     case QEvent::FocusOut:
     case QEvent::FocusIn:
         if (_screenWindow != nullptr) {
@@ -3300,8 +3472,7 @@ void TerminalDisplay::setSessionController(SessionController *controller)
 
     // Connect to session attribute changes to update badge display
     if (_sessionController && !_sessionController->session().isNull()) {
-        connect(_sessionController->session().data(), &Session::sessionAttributeChanged,
-                this, QOverload<>::of(&QWidget::update));
+        connect(_sessionController->session().data(), &Session::sessionAttributeChanged, this, QOverload<>::of(&TerminalDisplay::update));
     }
 }
 

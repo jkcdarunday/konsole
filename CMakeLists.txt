@@ -39,6 +39,7 @@ include(CheckFunctionExists)
 find_package(Qt6 ${QT_MIN_VERSION} CONFIG REQUIRED
     Core
     Multimedia
+    OpenGLWidgets
     PrintSupport
     Widgets
 )
@@ -63,6 +64,20 @@ find_package(KF6 ${KF6_DEP_VERSION} REQUIRED
     WindowSystem
     XmlGui
 )
+
+# Qt 6.7 exposes the scene graph text nodes used by the Vulkan renderer.
+# Older Qt builds retain the OpenGL renderer without raising the minimum Qt.
+option(WITH_VULKAN_RENDERER "Build the Vulkan renderer when matching Qt Quick development headers are available" ON)
+set(HAVE_VULKAN_RENDERER 0)
+if(WITH_VULKAN_RENDERER)
+    find_package(Qt6 6.7 QUIET COMPONENTS Quick QuickWidgets)
+    if(TARGET Qt6::QuickWidgets AND NOT TARGET Qt6::QuickWidgetsPrivate)
+        find_package(Qt6QuickWidgetsPrivate 6.7 QUIET)
+    endif()
+    if(TARGET Qt6::QuickWidgetsPrivate AND Qt6_VERSION VERSION_GREATER_EQUAL 6.7)
+        set(HAVE_VULKAN_RENDERER 1)
+    endif()
+endif()
 
 if(NOT WIN32)
     find_package(KF6 ${KF6_DEP_VERSION} REQUIRED

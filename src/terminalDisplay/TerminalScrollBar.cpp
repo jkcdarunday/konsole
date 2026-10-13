@@ -240,7 +240,9 @@ void TerminalScrollBar::scrollImage(int lines, const QRect &screenWindowRegion, 
     }
 
     // scroll the display vertically to match internal _image
-    display->scroll(0, display->terminalFont()->fontHeight() * (-lines), scrollRect);
+    if (!display->scrollGpuImage(lines, region)) {
+        display->scroll(0, display->terminalFont()->fontHeight() * (-lines), scrollRect);
+    }
 }
 
 void TerminalScrollBar::changeEvent(QEvent *e)

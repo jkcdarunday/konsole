@@ -9,6 +9,7 @@
 #define EMULATION_H
 
 // Qt
+#include <QElapsedTimer>
 #include <QSize>
 #include <QStringDecoder>
 #include <QStringEncoder>
@@ -543,6 +544,8 @@ private:
     bool _synchronizedUpdate = false;
     QTimer _bulkTimer1{this};
     QTimer _bulkTimer2{this};
+    QElapsedTimer _lastUpdate;
+    QList<QPointer<TerminalDisplay>> _displays;
     bool _imageSizeInitialized = false;
     bool _peekingPrimary = false;
     int _activeScreenIndex = 0;

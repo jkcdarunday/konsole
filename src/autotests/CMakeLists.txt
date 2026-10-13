@@ -92,3 +92,10 @@ ecm_add_test(
     TerminalDisplayAccessibleTest.cpp
     LINK_LIBRARIES konsoleprivate konsolecolorscheme Qt::Test ${KONSOLE_TEST_LIBS}
 )
+
+if(HAVE_VULKAN_RENDERER)
+    ecm_add_test(
+        TerminalRenderingTest.cpp
+        LINK_LIBRARIES konsoleprivate konsolecolorscheme Qt::QuickWidgets Qt::Test
+    )
+endif()

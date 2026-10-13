@@ -20,3 +20,5 @@
 
 /* Defined if libssh is available */
 #cmakedefine01 HAVE_LIBSSH
+
+#cmakedefine01 HAVE_VULKAN_RENDERER
